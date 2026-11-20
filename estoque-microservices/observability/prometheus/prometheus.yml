@@ -2,15 +2,15 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: "produtos-service"
+  - job_name: "catalogo-service"
     metrics_path: /metrics
     static_configs:
-      - targets: ["produtos-service:8000"]
+      - targets: ["catalogo-service:3000"]
 
-  - job_name: "movimentacoes-service"
+  - job_name: "estoque-service"
     metrics_path: /metrics
     static_configs:
-      - targets: ["movimentacoes-service:3000"]
+      - targets: ["estoque-service:8000"]
 
   - job_name: "prometheus"
     static_configs:

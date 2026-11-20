@@ -11,9 +11,30 @@ services:
     networks:
       - estoque-net
 
-  # ---------- SERVICO PRODUTOS (Python + Postgres) ----------
-  produtos-service:
-    build: ./produtos-service
+  # ---------- SERVICO CATALOGO (Node + MongoDB) ----------
+  catalogo-service:
+    build: ./catalogo-service
+    environment:
+      MONGO_URL: mongodb://mongo-catalogo:27017/catalogo
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      EVENTS_EXCHANGE: estoque.eventos
+      PORT: 3000
+    depends_on:
+      - mongo-catalogo
+      - rabbitmq
+    networks:
+      - estoque-net
+
+  mongo-catalogo:
+    image: mongo:7
+    volumes:
+      - mongo-catalogo-data:/data/db
+    networks:
+      - estoque-net
+
+  # ---------- SERVICO ESTOQUE (Python + Postgres) ----------
+  estoque-service:
+    build: ./estoque-service
     environment:
       DATABASE_URL: postgresql://estoque:estoque@postgres:5432/produtos
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
@@ -32,27 +53,6 @@ services:
       POSTGRES_DB: produtos
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    networks:
-      - estoque-net
-
-  # ---------- SERVICO MOVIMENTACOES (Node + MongoDB) ----------
-  movimentacoes-service:
-    build: ./movimentacoes-service
-    environment:
-      MONGO_URL: mongodb://mongo:27017/movimentacoes
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      MOVIMENTACOES_QUEUE: movimentacoes.estoque
-      PORT: 3000
-    depends_on:
-      - mongo
-      - rabbitmq
-    networks:
-      - estoque-net
-
-  mongo:
-    image: mongo:7
-    volumes:
-      - mongo-data:/data/db
     networks:
       - estoque-net
 
@@ -90,7 +90,7 @@ services:
 
 volumes:
   postgres-data:
-  mongo-data:
+  mongo-catalogo-data:
 
 networks:
   estoque-net:

@@ -1,7 +1,7 @@
 {
-  "name": "movimentacoes-service",
-  "version": "1.0.0",
-  "description": "Servico de movimentacoes de estoque (entradas e saidas)",
+  "name": "catalogo-service",
+  "version": "2.0.0",
+  "description": "Servico de catalogo de produtos (publica eventos produto.*)",
   "main": "src/server.js",
   "type": "module",
   "scripts": {

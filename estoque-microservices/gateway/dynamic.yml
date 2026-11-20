@@ -4,25 +4,14 @@
 
 http:
   routers:
-    produtos:
+    catalogo:
       rule: "PathPrefix(`/produtos`)"
       entryPoints:
         - web
-      service: produtos
-
-    movimentacoes:
-      rule: "PathPrefix(`/movimentacoes`)"
-      entryPoints:
-        - web
-      service: movimentacoes
+      service: catalogo
 
   services:
-    produtos:
+    catalogo:
       loadBalancer:
         servers:
-          - url: "http://produtos-service:8000"
-
-    movimentacoes:
-      loadBalancer:
-        servers:
-          - url: "http://movimentacoes-service:3000"
+          - url: "http://catalogo-service:3000"
