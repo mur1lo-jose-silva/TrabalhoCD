@@ -6,6 +6,9 @@ entryPoints:
   web:
     address: ":80"
 
+# Usado pelo healthcheck do container (traefik healthcheck --ping).
+ping: {}
+
 api:
   dashboard: true
   insecure: true
