@@ -36,23 +36,23 @@ services:
   estoque-service:
     build: ./estoque-service
     environment:
-      DATABASE_URL: postgresql://estoque:estoque@postgres:5432/produtos
+      DATABASE_URL: postgresql://estoque:estoque@postgres-estoque:5432/estoque
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      MOVIMENTACOES_QUEUE: movimentacoes.estoque
+      EVENTS_EXCHANGE: estoque.eventos
     depends_on:
-      - postgres
+      - postgres-estoque
       - rabbitmq
     networks:
       - estoque-net
 
-  postgres:
+  postgres-estoque:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: estoque
       POSTGRES_PASSWORD: estoque
-      POSTGRES_DB: produtos
+      POSTGRES_DB: estoque
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-estoque-data:/var/lib/postgresql/data
     networks:
       - estoque-net
 
@@ -89,7 +89,7 @@ services:
       - estoque-net
 
 volumes:
-  postgres-data:
+  postgres-estoque-data:
   mongo-catalogo-data:
 
 networks:

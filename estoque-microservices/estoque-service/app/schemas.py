@@ -1,32 +1,44 @@
-from typing import Optional
+from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class ProdutoBase(BaseModel):
+class MovimentacaoCreate(BaseModel):
+    produto_id: str = Field(min_length=1, max_length=64)
+    tipo: Literal["ENTRADA", "SAIDA"]
+    quantidade: int = Field(gt=0)
+    observacao: str | None = Field(default=None, max_length=500)
+
+
+class EstornoCreate(BaseModel):
+    observacao: str | None = Field(default=None, max_length=500)
+
+
+class MovimentacaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    produto_id: str
+    tipo: str
+    quantidade: int
+    observacao: str | None
+    origem: str
+    estorno_de: int | None
+    estornada_por: int | None = None
+    saldo_apos: int
+    criado_em: datetime
+
+
+class SaldoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    produto_id: str
     nome: str
     sku: str
-    categoria: Optional[str] = None
-    preco: float = 0.0
-    quantidade_estoque: int = 0
-    estoque_minimo: int = 0
-
-
-class ProdutoCreate(ProdutoBase):
-    pass
-
-
-class ProdutoUpdate(BaseModel):
-    nome: Optional[str] = None
-    sku: Optional[str] = None
-    categoria: Optional[str] = None
-    preco: Optional[float] = None
-    quantidade_estoque: Optional[int] = None
-    estoque_minimo: Optional[int] = None
-
-
-class ProdutoOut(ProdutoBase):
-    id: int
-
-    class Config:
-        from_attributes = True
+    categoria: str | None
+    saldo: int
+    estoque_minimo: int
+    abaixo_minimo: bool
+    ativo: bool
+    atualizado_em: datetime | None

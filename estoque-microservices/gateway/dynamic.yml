@@ -10,8 +10,19 @@ http:
         - web
       service: catalogo
 
+    estoque:
+      rule: "PathPrefix(`/estoque`)"
+      entryPoints:
+        - web
+      service: estoque
+
   services:
     catalogo:
       loadBalancer:
         servers:
           - url: "http://catalogo-service:3000"
+
+    estoque:
+      loadBalancer:
+        servers:
+          - url: "http://estoque-service:8000"
