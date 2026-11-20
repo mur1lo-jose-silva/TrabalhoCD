@@ -1,0 +1,28 @@
+# Configuracao dinamica do Traefik: rotas e servicos.
+# Cada rota encaminha um prefixo de caminho para o microsservico correto,
+# usando o nome do container na rede interna do Docker.
+
+http:
+  routers:
+    produtos:
+      rule: "PathPrefix(`/produtos`)"
+      entryPoints:
+        - web
+      service: produtos
+
+    movimentacoes:
+      rule: "PathPrefix(`/movimentacoes`)"
+      entryPoints:
+        - web
+      service: movimentacoes
+
+  services:
+    produtos:
+      loadBalancer:
+        servers:
+          - url: "http://produtos-service:8000"
+
+    movimentacoes:
+      loadBalancer:
+        servers:
+          - url: "http://movimentacoes-service:3000"

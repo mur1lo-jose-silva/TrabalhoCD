@@ -1,0 +1,16 @@
+# Configuracao estatica do Traefik.
+# Em vez de descobrir servicos pelo socket do Docker (que falha no
+# Docker Desktop / WSL2), lemos as rotas de um arquivo (dynamic.yml).
+
+entryPoints:
+  web:
+    address: ":80"
+
+api:
+  dashboard: true
+  insecure: true
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true

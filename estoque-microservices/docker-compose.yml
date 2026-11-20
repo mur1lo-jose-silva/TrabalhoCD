@@ -1,0 +1,97 @@
+services:
+  # ---------- API GATEWAY / ROTEAMENTO ----------
+  traefik:
+    image: traefik:v3.1
+    volumes:
+      - ./gateway/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./gateway/dynamic.yml:/etc/traefik/dynamic.yml:ro
+    ports:
+      - "80:80"      # porta unica de entrada da aplicacao
+      - "8080:8080"  # dashboard do Traefik
+    networks:
+      - estoque-net
+
+  # ---------- SERVICO PRODUTOS (Python + Postgres) ----------
+  produtos-service:
+    build: ./produtos-service
+    environment:
+      DATABASE_URL: postgresql://estoque:estoque@postgres:5432/produtos
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      MOVIMENTACOES_QUEUE: movimentacoes.estoque
+    depends_on:
+      - postgres
+      - rabbitmq
+    networks:
+      - estoque-net
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: estoque
+      POSTGRES_PASSWORD: estoque
+      POSTGRES_DB: produtos
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - estoque-net
+
+  # ---------- SERVICO MOVIMENTACOES (Node + MongoDB) ----------
+  movimentacoes-service:
+    build: ./movimentacoes-service
+    environment:
+      MONGO_URL: mongodb://mongo:27017/movimentacoes
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      MOVIMENTACOES_QUEUE: movimentacoes.estoque
+      PORT: 3000
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - estoque-net
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - estoque-net
+
+  # ---------- MENSAGERIA ASSINCRONA ----------
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "15672:15672"  # painel de administracao (usuario/senha: guest/guest)
+    networks:
+      - estoque-net
+
+  # ---------- OBSERVABILIDADE ----------
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - estoque-net
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"  # Grafana em http://localhost:3001 (admin/admin)
+    depends_on:
+      - prometheus
+    networks:
+      - estoque-net
+
+volumes:
+  postgres-data:
+  mongo-data:
+
+networks:
+  estoque-net:
+    driver: bridge
