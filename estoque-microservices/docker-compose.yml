@@ -35,6 +35,16 @@ services:
       retries: 10
     <<: *servico-app
 
+  # ---------- INTERFACE WEB (React compilado + nginx) ----------
+  frontend:
+    build: ./frontend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    <<: *servico-app
+
   # ---------- SERVICO CATALOGO (Node + MongoDB) ----------
   catalogo-service:
     build: ./catalogo-service

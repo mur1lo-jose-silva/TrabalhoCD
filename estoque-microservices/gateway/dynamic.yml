@@ -22,6 +22,15 @@ http:
         - web
       service: alertas
 
+    # Todo o resto vai para a interface. Prioridade 1 (a menor) para que as
+    # rotas de API acima sempre tenham preferencia.
+    frontend:
+      rule: "PathPrefix(`/`)"
+      priority: 1
+      entryPoints:
+        - web
+      service: frontend
+
   services:
     catalogo:
       loadBalancer:
@@ -37,3 +46,8 @@ http:
       loadBalancer:
         servers:
           - url: "http://alertas-service:3000"
+
+    frontend:
+      loadBalancer:
+        servers:
+          - url: "http://frontend:80"
