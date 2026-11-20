@@ -131,7 +131,7 @@ consumidor possa simplesmente substituir a sua cópia se a `versao` for mais nov
 |---|---|
 | **Nenhum evento se perde se o broker cair** | Produtores usam **outbox**: o evento é gravado no mesmo banco e na mesma operação atômica que a mudança de dados, e um laço em segundo plano o publica com *publisher confirms* |
 | **Entrega pelo menos uma vez** | Filas e mensagens duráveis, `ack` manual só depois de gravar no banco |
-| **Duplicatas não causam efeito duplo** | Cada consumidor guarda os `event_id` já processados (idempotência) |
+| **Duplicatas não causam efeito duplo** | Estoque: guarda os `event_id` já processados, na mesma transação da alteração. Alertas (MongoDB, sem transação entre documentos): guarda a última `versao` aplicada por produto e só executa ações que dependem do estado atual (abrir só se não há alerta ativo, resolver só se há), então reaplicar um evento não tem efeito |
 | **Eventos antigos não sobrescrevem dados novos** | O consumidor ignora eventos com `versao` menor ou igual à que já tem |
 | **Mensagem com erro não trava a fila** | Em erro de processamento, `nack` sem reenfileirar: a mensagem vai para a `<fila>.dlq` |
 

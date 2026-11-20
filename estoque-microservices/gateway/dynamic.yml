@@ -16,6 +16,12 @@ http:
         - web
       service: estoque
 
+    alertas:
+      rule: "PathPrefix(`/alertas`)"
+      entryPoints:
+        - web
+      service: alertas
+
   services:
     catalogo:
       loadBalancer:
@@ -26,3 +32,8 @@ http:
       loadBalancer:
         servers:
           - url: "http://estoque-service:8000"
+
+    alertas:
+      loadBalancer:
+        servers:
+          - url: "http://alertas-service:3000"

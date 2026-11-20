@@ -56,6 +56,27 @@ services:
     networks:
       - estoque-net
 
+  # ---------- SERVICO ALERTAS (Node + MongoDB) ----------
+  alertas-service:
+    build: ./alertas-service
+    environment:
+      MONGO_URL: mongodb://mongo-alertas:27017/alertas
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      EVENTS_EXCHANGE: estoque.eventos
+      PORT: 3000
+    depends_on:
+      - mongo-alertas
+      - rabbitmq
+    networks:
+      - estoque-net
+
+  mongo-alertas:
+    image: mongo:7
+    volumes:
+      - mongo-alertas-data:/data/db
+    networks:
+      - estoque-net
+
   # ---------- MENSAGERIA ASSINCRONA ----------
   rabbitmq:
     image: rabbitmq:3.13-management
@@ -91,6 +112,7 @@ services:
 volumes:
   postgres-estoque-data:
   mongo-catalogo-data:
+  mongo-alertas-data:
 
 networks:
   estoque-net:
