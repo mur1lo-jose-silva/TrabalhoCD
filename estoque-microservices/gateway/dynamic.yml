@@ -9,12 +9,23 @@ http:
       entryPoints:
         - web
       service: produtos
+      priority: 20
 
     movimentacoes:
       rule: "PathPrefix(`/movimentacoes`)"
       entryPoints:
         - web
       service: movimentacoes
+      priority: 20
+
+    # Front end (UI) na raiz. Prioridade baixa para que /produtos e
+    # /movimentacoes sempre vencam o roteamento.
+    frontend:
+      rule: "PathPrefix(`/`)"
+      entryPoints:
+        - web
+      service: frontend
+      priority: 1
 
   services:
     produtos:
@@ -26,3 +37,8 @@ http:
       loadBalancer:
         servers:
           - url: "http://movimentacoes-service:3000"
+
+    frontend:
+      loadBalancer:
+        servers:
+          - url: "http://frontend:80"

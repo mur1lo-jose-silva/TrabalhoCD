@@ -11,6 +11,12 @@ services:
     networks:
       - estoque-net
 
+  # ---------- FRONT END (UI web, servido pelo gateway na raiz) ----------
+  frontend:
+    build: ./frontend
+    networks:
+      - estoque-net
+
   # ---------- SERVICO PRODUTOS (Python + Postgres) ----------
   produtos-service:
     build: ./produtos-service

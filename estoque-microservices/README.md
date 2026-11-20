@@ -92,7 +92,8 @@ docker compose down -v       # para e apaga também os volumes (bancos zerados)
 
 | Serviço | URL | Credenciais |
 |---|---|---|
-| Aplicação (via Gateway) | http://localhost | — |
+| **Front end (painel web)** | **http://localhost** | — |
+| API via Gateway | http://localhost/produtos · http://localhost/movimentacoes | — |
 | Dashboard do Traefik | http://localhost:8080 | — |
 | Prometheus | http://localhost:9090 | — |
 | Grafana | http://localhost:3001 | admin / admin |
@@ -176,9 +177,12 @@ curl http://localhost/produtos/1
 estoque-microservices/
 ├── docker-compose.yml          # orquestração de todo o ambiente
 ├── README.md
+├── frontend/                   # painel web (HTML/CSS/JS + Nginx)
+│   ├── Dockerfile
+│   └── index.html              # UI de produtos e movimentações
 ├── gateway/                    # configuração do Traefik (API Gateway)
 │   ├── traefik.yml             # config estática (entrypoints, dashboard)
-│   └── dynamic.yml             # rotas: /produtos e /movimentacoes
+│   └── dynamic.yml             # rotas: / (UI), /produtos e /movimentacoes
 ├── produtos-service/           # Python + FastAPI + Postgres
 │   ├── Dockerfile
 │   ├── requirements.txt
