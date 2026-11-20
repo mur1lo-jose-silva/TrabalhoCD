@@ -13,7 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from .database import SessionLocal
 from .mensageria import FILA, conectar, declarar_topologia_consumidor
-from .metricas import eventos_consumidos
+from .metricas import eventos_consumidos, movimentacoes_registradas
 from .outbox import notificar_outbox
 from .servico import EventoInvalido, processar_evento_produto
 
@@ -70,6 +70,8 @@ def _processar(ch, method, properties, body) -> None:
         f"{(evento.get('dados') or {}).get('produto_id')}: {resultado}"
     )
     if resultado == "aplicado":
+        if tipo == "produto.criado" and int((evento.get("dados") or {}).get("estoque_inicial") or 0) > 0:
+            movimentacoes_registradas.labels(tipo="ENTRADA", origem="ESTOQUE_INICIAL").inc()
         notificar_outbox()  # pode ter gerado estoque.atualizado
 
 

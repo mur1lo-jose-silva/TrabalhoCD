@@ -1,21 +1,33 @@
 global:
-  scrape_interval: 15s
+  # Intervalo curto para que a demonstracao apareca rapido no Grafana.
+  scrape_interval: 5s
 
 scrape_configs:
+  # ---- microsservicos (cada um expoe /metrics) ----
   - job_name: "catalogo-service"
-    metrics_path: /metrics
     static_configs:
       - targets: ["catalogo-service:3000"]
 
   - job_name: "estoque-service"
-    metrics_path: /metrics
     static_configs:
       - targets: ["estoque-service:8000"]
 
   - job_name: "alertas-service"
-    metrics_path: /metrics
     static_configs:
       - targets: ["alertas-service:3000"]
+
+  # ---- infraestrutura ----
+  # Plugin rabbitmq_prometheus: /metrics/per-object traz as metricas POR FILA
+  # (mensagens acumuladas, DLQs...).
+  - job_name: "rabbitmq"
+    metrics_path: /metrics/per-object
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  # Requisicoes que passam pelo API Gateway, por servico de destino.
+  - job_name: "traefik"
+    static_configs:
+      - targets: ["traefik:8080"]
 
   - job_name: "prometheus"
     static_configs:
