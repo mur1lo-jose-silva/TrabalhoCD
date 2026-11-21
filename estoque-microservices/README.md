@@ -1,173 +1,270 @@
 # Sistema de Gerenciamento de Estoque — Arquitetura de Microsserviços
 
 Trabalho prático de **Sistemas Distribuídos e Arquitetura de Microsserviços**.
-Aplicação de gerenciamento de estoque dividida em dois microsserviços
-heterogêneos, cada um com seu próprio banco de dados, comunicando-se de forma
-assíncrona via message broker, com roteamento centralizado por API Gateway e
-observabilidade com métricas.
+
+Um sistema de estoque dividido em **três microsserviços heterogêneos** (Node.js e
+Python), cada um com o **próprio banco de dados**, que se comunicam por
+**eventos no RabbitMQ**, com **API Gateway** (Traefik), **interface web** (React)
+e **observabilidade** (Prometheus + Grafana).
 
 ---
 
 ## 1. Arquitetura
 
 ```
-                        ┌───────────────────────────┐
-     Cliente  ───────▶  │   Traefik (API Gateway)    │   porta 80
-                        └─────────────┬─────────────┘
-                           /produtos  │  /movimentacoes
-                   ┌───────────────────┴────────────────────┐
-                   ▼                                         ▼
-        ┌──────────────────────┐                ┌──────────────────────────┐
-        │  Serviço Produtos     │                │  Serviço Movimentações    │
-        │  Python / FastAPI     │                │  Node.js / Express        │
-        └──────────┬───────────┘                └────────────┬─────────────┘
-                   │                                          │
-                   ▼                                          ▼
-            ┌────────────┐                            ┌────────────┐
-            │  Postgres  │                            │  MongoDB   │
-            └────────────┘                            └────────────┘
-                   ▲                                          │
-                   │          evento de movimentação          │
-                   └──────────────  RabbitMQ  ◀───────────────┘
-                              (fila: movimentacoes.estoque)
+                       ┌──────────────────── Traefik (porta 80) ─────────────────────┐
+                       │   /            /produtos         /estoque         /alertas   │
+                       └───┬──────────────┬─────────────────┬────────────────┬──────┘
+                           ▼              ▼                 ▼                ▼
+                      Interface       Catálogo           Estoque          Alertas
+                      React+nginx     Node + MongoDB     Python + Postgres Node + MongoDB
+                                         │                 │   ▲              ▲
+                          produto.criado │                 │   │ produto.*    │ estoque.atualizado
+                       produto.atualizado│                 │   │              │
+                         produto.removido│   estoque.atualizado               │
+                                         ▼                 ▼   │              │
+                       ┌──────────── exchange "estoque.eventos" (topic) ─────────────┐
+                       │  fila estoque.produtos ← produto.*                          │
+                       │  fila alertas.estoque  ← estoque.atualizado                 │
+                       │  + exchange "estoque.dlx" com uma DLQ por fila              │
+                       └─────────────────────────────────────────────────────────────┘
 
-        Prometheus  ──coleta /metrics──▶  (produtos e movimentacoes)
-        Grafana     ──visualiza──▶  Prometheus
+       Prometheus ── coleta /metrics ──▶ serviços, RabbitMQ e Traefik
+       Grafana    ── dashboard pronto ──▶ Prometheus
 ```
 
-### Como os princípios do trabalho são atendidos
+| Serviço | Linguagem | Banco | É dono de | Publica | Consome |
+|---|---|---|---|---|---|
+| **Catálogo** | Node.js / Express | MongoDB | O que a empresa vende: nome, SKU, preço, estoque mínimo, **atributos livres por categoria** | `produto.*` | — |
+| **Estoque** | Python / FastAPI | PostgreSQL | **Saldo** e **histórico de movimentações** (+ cópia local dos produtos) | `estoque.atualizado` | `produto.*` |
+| **Alertas** | Node.js / Express | MongoDB (próprio) | Alertas de estoque abaixo do mínimo | — | `estoque.atualizado` |
+| **Interface** | React (Vite) + nginx | — | Telas | — | API + SSE |
+
+### Como um dia de uso passa pelo sistema
+
+1. O gerente **cadastra** um produto com estoque inicial 50 → o **Catálogo** grava e publica `produto.criado`.
+2. O **Estoque** consome o evento, cria a cópia local do produto e registra uma **ENTRADA inicial** de 50.
+3. O vendedor registra uma **SAÍDA** → o Estoque valida o saldo **na hora** (na mesma transação) e publica `estoque.atualizado`.
+4. Se o saldo ficou abaixo do mínimo, o **Alertas** abre um alerta e o **empurra para a tela** (Server-Sent Events).
+
+---
+
+## 2. Decisões de arquitetura
+
+### Por que Catálogo e Estoque são serviços separados
+São perguntas diferentes do negócio: o Catálogo responde **o que** vendemos; o
+Estoque responde **quanto temos e por quê**. Saldo e movimentações ficam
+**juntos** no Estoque porque o saldo é a soma das movimentações: assim, validar
+"posso tirar 10 unidades?" é uma única transação, sem saga e sem saldo negativo.
+
+### Por que cada banco
+| Serviço | Banco | Motivo |
+|---|---|---|
+| Catálogo | MongoDB | Cada categoria tem atributos diferentes (switch de teclado, resolução de monitor…). Documentos aceitam isso sem mudar esquema. |
+| Estoque | PostgreSQL | Dados transacionais: `UPDATE` condicional, `CHECK (saldo >= 0)`, `UNIQUE`, transações ACID. |
+| Alertas | MongoDB | Lista simples de alertas, isolada dos outros serviços. |
+
+### Síncrono × assíncrono
+> **Chamada síncrona** onde o usuário precisa de resposta imediata (validar
+> saldo). **Evento** onde um serviço não deve depender do outro (replicar o
+> catálogo e notificar alertas).
+
+| Benefício da mensageria | Onde aparece |
+|---|---|
+| **Desacoplamento temporal** | Alertas fora do ar? Os eventos esperam na fila e são processados quando ele volta. |
+| **Pub/sub** | O Estoque publica `estoque.atualizado` sem saber que o Alertas existe. Um novo serviço (ex.: Compras) só cria a própria fila. |
+| **Autonomia de dados** | O Estoque tem a própria cópia dos produtos: vendas continuam com o Catálogo fora do ar. |
+
+### Garantias de entrega
+| Problema | Solução | Onde |
+|---|---|---|
+| Broker fora do ar na hora de publicar | **Outbox**: o evento é gravado no banco junto com a mudança e publicado depois, com *publisher confirms* | Catálogo (no próprio documento) e Estoque (tabela `outbox`) |
+| Mensagem entregue duas vezes | **Idempotência**: `event_id` já processado é ignorado | Estoque (tabela `eventos_processados`), Alertas (versão por produto + ações por estado) |
+| Eventos fora de ordem | **Versão** do recurso no evento; versões antigas são ignoradas | Estoque e Alertas |
+| Mensagem com erro travando a fila | **Dead-letter queue** (`<fila>.dlq`) | Estoque e Alertas |
+| Duas vendas ao mesmo tempo | `UPDATE ... WHERE saldo >= quantidade` + `CHECK` | Estoque |
+
+O contrato completo das mensagens está em **[docs/eventos.md](docs/eventos.md)**.
+
+### Requisitos do trabalho
 
 | Requisito | Implementação |
 |---|---|
-| Heterogeneidade (2 linguagens) | **Python (FastAPI)** + **Node.js (Express)** |
-| Database per Service | **Postgres** (produtos) + **MongoDB** (movimentações), isolados |
-| Conteinerização e orquestração | **Docker** + **docker-compose.yml** |
-| API Gateway / Roteamento | **Traefik** (porta única 80, roteamento por path) |
-| Observabilidade | **Prometheus** (métricas) + **Grafana** (dashboards) |
-| Mensageria assíncrona (bônus) | **RabbitMQ** (evento a cada movimentação) |
-| Comunicação padronizada | **JSON** sobre HTTP (REST) e nas mensagens |
-
-### Fluxo de eventos (o coração do sistema)
-
-1. Uma movimentação (ENTRADA ou SAIDA) é registrada no **Serviço de Movimentações**.
-2. O serviço grava no MongoDB e **publica um evento** no RabbitMQ.
-3. O **Serviço de Produtos** consome o evento e **atualiza o saldo** do produto no Postgres.
-
-Isso demonstra o desacoplamento: nenhum serviço acessa o banco do outro — eles se
-sincronizam apenas por mensagens.
+| Heterogeneidade (2+ linguagens) | **Node.js** (Catálogo, Alertas) + **Python** (Estoque) |
+| Database per Service | **MongoDB** (Catálogo), **PostgreSQL** (Estoque), **MongoDB** separado (Alertas) |
+| Conteinerização e orquestração | **Docker** + **docker-compose.yml** com healthchecks |
+| API Gateway / Roteamento | **Traefik**: porta única 80, roteamento por caminho |
+| Observabilidade | **Prometheus** + **Grafana** com dashboard provisionado |
+| Mensageria assíncrona | **RabbitMQ** com exchange topic, outbox, idempotência e DLQ |
+| Comunicação padronizada | **JSON** sobre HTTP (REST), nos eventos e no SSE |
 
 ---
 
-## 2. Pré-requisitos
+## 3. Como executar
 
-- **Docker** e **Docker Compose** instalados ([instruções oficiais](https://docs.docker.com/get-docker/)).
-- Portas livres na máquina: `80`, `8080`, `9090`, `3001`, `15672`.
-
----
-
-## 3. Como executar (máquina limpa)
+**Pré-requisitos:** Docker com Docker Compose, 4 GB de memória livres para o
+Docker e as portas `80`, `8080`, `9090`, `3001` e `15672` livres.
 
 ```bash
-# 1. Clonar o repositório
-git clone <URL_DO_REPOSITORIO>
-cd estoque-microservices
-
-# 2. Subir todo o ambiente distribuído (um único comando)
 docker compose up --build
 ```
 
-Aguarde alguns segundos até todos os contêineres ficarem prontos. Para rodar em
-segundo plano, use `docker compose up --build -d`.
-
-Para derrubar tudo:
+Na primeira vez leva alguns minutos (download das imagens e build). Para rodar
+em segundo plano e esperar tudo ficar saudável:
 
 ```bash
-docker compose down          # para os contêineres
-docker compose down -v       # para e apaga também os volumes (bancos zerados)
+docker compose up --build -d --wait
 ```
 
----
+Para derrubar:
 
-## 4. Painéis e portas
+```bash
+docker compose down        # para os contêineres (os dados ficam)
+docker compose down -v     # para e apaga os bancos e filas
+```
 
-| Serviço | URL | Credenciais |
+> **Windows:** se `http://localhost` demorar ou não abrir, use `http://127.0.0.1`.
+
+### Endereços
+
+| O quê | URL | Acesso |
 |---|---|---|
-| **Front end (painel web)** | **http://localhost** | — |
-| API via Gateway | http://localhost/produtos · http://localhost/movimentacoes | — |
-| Dashboard do Traefik | http://localhost:8080 | — |
+| **Interface** | http://localhost | — |
+| Grafana (dashboard "Estoque · Microsserviços") | http://localhost:3001 | aberto para leitura; admin/admin para editar |
+| RabbitMQ (filas e exchanges) | http://localhost:15672 | guest / guest |
 | Prometheus | http://localhost:9090 | — |
-| Grafana | http://localhost:3001 | admin / admin |
-| RabbitMQ (admin) | http://localhost:15672 | guest / guest |
+| Traefik (rotas) | http://localhost:8080 | — |
 
 ---
 
-## 5. Endpoints da API (todos via `http://localhost`)
+## 4. Interface
 
-### Serviço de Produtos — `/produtos`
-
-| Método | Rota | Descrição |
-|---|---|---|
-| GET | `/produtos` | Lista produtos |
-| POST | `/produtos` | Cria produto |
-| GET | `/produtos/{id}` | Busca por id |
-| PUT | `/produtos/{id}` | Atualiza produto |
-| DELETE | `/produtos/{id}` | Remove produto |
-
-### Serviço de Movimentações — `/movimentacoes`
-
-| Método | Rota | Descrição |
-|---|---|---|
-| GET | `/movimentacoes` | Lista movimentações |
-| POST | `/movimentacoes` | Cria movimentação (publica evento) |
-| GET | `/movimentacoes/{id}` | Busca por id |
-| PUT | `/movimentacoes/{id}` | Atualiza movimentação |
-| DELETE | `/movimentacoes/{id}` | Remove movimentação |
+| Tela | O que faz |
+|---|---|
+| **Produtos** | Catálogo com o saldo vindo do Estoque. Mostra "sincronizando…" enquanto o Estoque ainda não recebeu o evento. Se o Catálogo cair, a lista passa a vir da cópia local do Estoque. |
+| **Novo / editar produto** | Campos fixos, **atributos dinâmicos** e estoque inicial (só na criação). O saldo não é editável. |
+| **Movimentações** | Registra ENTRADA/SAÍDA com resposta imediata ("saldo insuficiente"), histórico filtrável e **estorno**. |
+| **Alertas** | Alertas ativos e resolvidos, **ao vivo** via SSE. Contador no menu e aviso na tela quando um alerta abre ou fecha. |
 
 ---
 
-## 6. Roteiro de teste (ideal para a apresentação)
+## 5. API (tudo pelo Gateway, porta 80)
+
+Erros sempre no formato `{"erro": "mensagem"}`.
+
+### Catálogo — `/produtos`
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/produtos` | Lista (filtros `categoria`, `incluir_inativos=true`) |
+| POST | `/produtos` | Cadastra. Aceita `estoque_inicial` (vai no evento, não é guardado aqui) |
+| GET | `/produtos/{id}` | Detalhe |
+| PUT | `/produtos/{id}` | Edição parcial (nome, sku, categoria, preco, estoque_minimo, atributos) |
+| DELETE | `/produtos/{id}` | Remoção lógica (o histórico no Estoque é mantido) |
+
+### Estoque — `/estoque`
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/estoque/saldos` | Saldo de todos os produtos (`incluir_inativos=true`) |
+| GET | `/estoque/saldos/{produto_id}` | Saldo de um produto |
+| POST | `/estoque/movimentacoes` | Registra ENTRADA/SAÍDA. `409` se o saldo for insuficiente |
+| GET | `/estoque/movimentacoes` | Histórico (filtros `produto_id`, `tipo`, `limite`) |
+| GET | `/estoque/movimentacoes/{id}` | Detalhe |
+| POST | `/estoque/movimentacoes/{id}/estorno` | Estorna (cria a movimentação oposta) |
+
+Não existe `PUT` nem `DELETE` de movimentação: o histórico é imutável.
+
+### Alertas — `/alertas`
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/alertas` | Lista (filtros `status=ATIVO\|RESOLVIDO`, `produto_id`, `limite`) |
+| GET | `/alertas/{id}` | Detalhe |
+| GET | `/alertas/stream` | Fluxo em tempo real (Server-Sent Events) |
+
+### Exemplo pela linha de comando
 
 ```bash
-# 1. Criar um produto com saldo inicial de 50
-curl -X POST http://localhost/produtos \
-  -H "Content-Type: application/json" \
-  -d '{"nome":"Teclado Mecânico","sku":"TEC-001","categoria":"Periféricos","preco":250.0,"quantidade_estoque":50,"estoque_minimo":10}'
+# cadastrar (no PowerShell use curl.exe)
+curl -X POST http://localhost/produtos -H "Content-Type: application/json" \
+  -d '{"nome":"Teclado Mecânico","sku":"TEC-001","preco":250,"estoque_minimo":10,"estoque_inicial":12,"atributos":{"switch":"Blue"}}'
 
-# 2. Conferir o produto criado (anote o "id" retornado, ex.: 1)
-curl http://localhost/produtos
+# vender 4 (troque <ID> pelo "id" retornado)
+curl -X POST http://localhost/estoque/movimentacoes -H "Content-Type: application/json" \
+  -d '{"produto_id":"<ID>","tipo":"SAIDA","quantidade":4,"observacao":"Venda balcão"}'
 
-# 3. Registrar uma SAÍDA de 10 unidades do produto de id 1
-curl -X POST http://localhost/movimentacoes \
-  -H "Content-Type: application/json" \
-  -d '{"produto_id":1,"tipo":"SAIDA","quantidade":10,"observacao":"Venda balcão"}'
-
-# 4. Conferir o saldo do produto: deve ter caído de 50 para 40 (atualizado via RabbitMQ)
-curl http://localhost/produtos/1
-
-# 5. Registrar uma ENTRADA de 5 unidades
-curl -X POST http://localhost/movimentacoes \
-  -H "Content-Type: application/json" \
-  -d '{"produto_id":1,"tipo":"ENTRADA","quantidade":5,"observacao":"Reposição"}'
-
-# 6. Conferir novamente: saldo deve ir de 40 para 45
-curl http://localhost/produtos/1
+curl http://localhost/estoque/saldos/<ID>
+curl http://localhost/alertas?status=ATIVO
 ```
-
-> **Dica de apresentação:** deixe `docker compose logs -f produtos-service`
-> aberto em um terminal. A cada movimentação você verá a mensagem sendo
-> consumida e o saldo sendo atualizado em tempo real — prova visual da
-> mensageria funcionando.
 
 ---
 
-## 7. Observabilidade
+## 6. Roteiro de apresentação
 
-- **Prometheus** (http://localhost:9090) coleta as métricas expostas em
-  `/metrics` por cada serviço. Em *Status → Targets* os dois serviços devem
-  aparecer como `UP`.
-- **Grafana** (http://localhost:3001) já vem com o Prometheus configurado como
-  fonte de dados. Crie um painel e experimente a query `http_requests_total`
-  para ver o número de requisições por serviço.
+Deixe abertos lado a lado: a **interface** (http://localhost), o **RabbitMQ**
+(http://localhost:15672 → *Queues*) e o **Grafana** (http://localhost:3001).
+
+### Parte 1 — Fluxo normal
+1. **Produtos → Novo produto**: "Teclado Mecânico", mínimo **10**, estoque inicial **12**, atributo `switch = Blue`.
+   - Mostre o "sincronizando…" virando saldo 12: o evento `produto.criado` chegou ao Estoque.
+   - Em **Movimentações**, a ENTRADA de origem "estoque inicial" foi criada pelo Estoque.
+2. **Movimentações**: SAÍDA de **4** → saldo 8. O alerta aparece **sozinho** (aviso + contador no menu).
+3. Tente uma SAÍDA de **100** → recusada na hora: *saldo insuficiente*. Validação síncrona, sem saga.
+4. **Estorne** a venda → saldo volta a 12 e o alerta é **resolvido** ao vivo.
+
+### Parte 2 — Resiliência (o porquê da mensageria)
+
+**Desacoplamento temporal — Alertas fora do ar**
+```bash
+docker compose stop alertas-service
+```
+Faça 3 vendas até ficar abaixo do mínimo. No RabbitMQ, a fila
+**`alertas.estoque`** mostra as mensagens **acumuladas**; a tela mostra
+"reconectando". Depois:
+```bash
+docker compose start alertas-service
+```
+A fila esvazia e o alerta aparece com o saldo correto.
+
+**Autonomia de dados — Catálogo fora do ar**
+```bash
+docker compose stop catalogo-service
+```
+A tela de Produtos avisa que o Catálogo caiu, mas mostra os produtos pela cópia do
+Estoque, e **as vendas continuam funcionando**. Religue com `docker compose start catalogo-service`.
+
+**Outbox — RabbitMQ fora do ar**
+```bash
+docker compose stop rabbitmq
+```
+Registre uma movimentação: ela é **aceita**. No Grafana, "Eventos pendentes no
+outbox" sobe para 1. Religue com `docker compose start rabbitmq`: o evento é
+publicado e o painel volta a 0.
+
+### Parte 3 — Observabilidade
+No Grafana, o dashboard mostra a profundidade das filas durante a Parte 2,
+eventos publicados/consumidos (incluindo duplicados ignorados), movimentações,
+recusas por saldo insuficiente, requisições por serviço no Gateway e os erros 502
+enquanto um serviço estava parado.
+
+---
+
+## 7. Testes
+
+| Nível | O que cobre | Como rodar |
+|---|---|---|
+| **Unidade — Alertas** | Regra de abrir/atualizar/resolver e validação de eventos | `cd alertas-service && npm install && npm test` |
+| **Integração — Estoque** | Regras com Postgres real: saldo, concorrência, estorno, idempotência, versão | ver abaixo |
+| **Ponta a ponta** | O sistema inteiro, incluindo os 3 cenários de falha | `python testes/e2e.py` (com o ambiente no ar) |
+
+Testes do Estoque (usam o Postgres do compose, num banco separado `estoque_teste`):
+
+```bash
+docker compose up -d --wait postgres-estoque
+docker compose run --rm --no-deps -v ./estoque-service:/src -w /src estoque-service \
+  sh -c "pip install -q -r requirements-dev.txt && pytest -q"
+```
+
+O teste ponta a ponta para e religa contêineres; use `--sem-falhas` para pular
+essa parte, ou `-p <projeto>` se subiu o compose com outro nome de projeto.
 
 ---
 
@@ -175,42 +272,32 @@ curl http://localhost/produtos/1
 
 ```
 estoque-microservices/
-├── docker-compose.yml          # orquestração de todo o ambiente
-├── README.md
-├── frontend/                   # painel web (HTML/CSS/JS + Nginx)
-│   ├── Dockerfile
-│   └── index.html              # UI de produtos e movimentações
-├── gateway/                    # configuração do Traefik (API Gateway)
-│   ├── traefik.yml             # config estática (entrypoints, dashboard)
-│   └── dynamic.yml             # rotas: / (UI), /produtos e /movimentacoes
-├── produtos-service/           # Python + FastAPI + Postgres
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── app/
-│       ├── main.py             # rotas CRUD + métricas
-│       ├── database.py         # conexão Postgres
-│       ├── models.py           # modelo Produto
-│       ├── schemas.py          # validação (Pydantic)
-│       └── consumer.py         # consome eventos do RabbitMQ
-├── movimentacoes-service/      # Node.js + Express + MongoDB
-│   ├── Dockerfile
-│   ├── package.json
-│   └── src/
-│       ├── server.js           # app + métricas
-│       ├── db.js               # conexão MongoDB
-│       ├── model.js            # schema Movimentacao
-│       ├── routes.js           # rotas CRUD
-│       └── publisher.js        # publica eventos no RabbitMQ
-└── observability/
-    ├── prometheus/prometheus.yml
-    └── grafana/provisioning/datasources/datasource.yml
+├── docker-compose.yml           # orquestração (healthchecks, dependências)
+├── docs/eventos.md              # contrato das mensagens entre serviços
+├── gateway/                     # Traefik: traefik.yml (estático), dynamic.yml (rotas)
+├── catalogo-service/            # Node + MongoDB
+│   └── src/  model.js · routes.js · outbox.js · eventos.js · metricas.js · server.js
+├── estoque-service/             # Python + Postgres
+│   ├── app/  models.py · servico.py (regras) · consumer.py · outbox.py · main.py
+│   └── tests/                   # pytest com Postgres real
+├── alertas-service/             # Node + MongoDB
+│   ├── src/  regras.js · processador.js · consumer.js · sse.js · routes.js
+│   └── test/                    # node --test
+├── frontend/                    # React + Vite, servido por nginx
+│   └── src/  App.jsx · api.js · hooks.js · paginas/
+├── observability/
+│   ├── prometheus/prometheus.yml
+│   └── grafana/provisioning/    # datasource + dashboard versionado
+└── testes/e2e.py                # teste ponta a ponta
 ```
 
 ---
 
-## 9. Possíveis melhorias (extras)
+## 9. Possíveis evoluções
 
-- **Serviço de Alertas**: um terceiro microsserviço que apenas consome os eventos
-  do RabbitMQ e gera um alerta quando o saldo cruza o `estoque_minimo`.
-- Publicar eventos compensatórios também na edição/remoção de movimentações.
-- Dashboards do Grafana versionados via *provisioning*.
+- **Serviço de Compras**: consumir `estoque.atualizado` e gerar pedidos de
+  reposição automaticamente — sem alterar nenhum serviço existente.
+- **Autenticação e perfis** (gerente, vendedor, almoxarife) no Gateway.
+- **Réplicas** dos serviços atrás do Traefik (os consumidores já são
+  idempotentes e o saldo é protegido no banco).
+- MongoDB em **replica set**, permitindo transações entre documentos no Catálogo.

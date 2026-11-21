@@ -4,39 +4,48 @@
 
 http:
   routers:
-    produtos:
+    catalogo:
       rule: "PathPrefix(`/produtos`)"
       entryPoints:
         - web
-      service: produtos
-      priority: 20
+      service: catalogo
 
-    movimentacoes:
-      rule: "PathPrefix(`/movimentacoes`)"
+    estoque:
+      rule: "PathPrefix(`/estoque`)"
       entryPoints:
         - web
-      service: movimentacoes
-      priority: 20
+      service: estoque
 
-    # Front end (UI) na raiz. Prioridade baixa para que /produtos e
-    # /movimentacoes sempre vencam o roteamento.
+    alertas:
+      rule: "PathPrefix(`/alertas`)"
+      entryPoints:
+        - web
+      service: alertas
+
+    # Todo o resto vai para a interface. Prioridade 1 (a menor) para que as
+    # rotas de API acima sempre tenham preferencia.
     frontend:
       rule: "PathPrefix(`/`)"
+      priority: 1
       entryPoints:
         - web
       service: frontend
-      priority: 1
 
   services:
-    produtos:
+    catalogo:
       loadBalancer:
         servers:
-          - url: "http://produtos-service:8000"
+          - url: "http://catalogo-service:3000"
 
-    movimentacoes:
+    estoque:
       loadBalancer:
         servers:
-          - url: "http://movimentacoes-service:3000"
+          - url: "http://estoque-service:8000"
+
+    alertas:
+      loadBalancer:
+        servers:
+          - url: "http://alertas-service:3000"
 
     frontend:
       loadBalancer:
