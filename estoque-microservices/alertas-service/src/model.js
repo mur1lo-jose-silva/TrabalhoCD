@@ -7,8 +7,9 @@ const alertaSchema = new mongoose.Schema(
     sku: { type: String },
     saldo: { type: Number, required: true },
     estoque_minimo: { type: Number, required: true },
-    status: { type: String, enum: ["ATIVO", "RESOLVIDO"], default: "ATIVO" },
-    resolvido_em: { type: Date, default: null },
+    // RESOLVIDO: o saldo voltou ao minimo. ENCERRADO: o produto foi removido.
+    status: { type: String, enum: ["ATIVO", "RESOLVIDO", "ENCERRADO"], default: "ATIVO" },
+    resolvido_em: { type: Date, default: null }, // quando deixou de estar ativo
     aberto_por_evento: { type: String },
     ultimo_evento: { type: String },
   },

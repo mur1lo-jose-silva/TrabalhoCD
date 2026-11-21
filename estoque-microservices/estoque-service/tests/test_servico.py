@@ -97,6 +97,19 @@ def test_produto_removido_bloqueia_movimentacoes(db):
     assert e.value.status == 409
 
 
+def test_produto_removido_publica_estoque_atualizado_sem_mudar_saldo(db):
+    pid = novo_produto(db, inicial=5)
+    processar_evento_produto(db, evento("produto.removido", 2, produto_id=pid))
+    db.commit()
+    ultimo = outbox_de(db, pid)[-1]
+    assert ultimo["dados"]["motivo"] == "PRODUTO_REMOVIDO"
+    assert ultimo["dados"]["ativo"] is False
+    assert ultimo["dados"]["saldo_atual"] == 5
+    assert db.get(ItemEstoque, pid).saldo == 5
+    movs = db.scalars(select(Movimentacao).where(Movimentacao.produto_id == pid)).all()
+    assert len(movs) == 1  # so a ENTRADA inicial: remover nao gera movimentacao
+
+
 def test_evento_mal_formado_e_invalido(db):
     with pytest.raises(EventoInvalido):
         processar_evento_produto(db, {"tipo": "produto.criado"})
