@@ -1,0 +1,16 @@
+{
+  "name": "movimentacoes-service",
+  "version": "1.0.0",
+  "description": "Servico de movimentacoes de estoque (entradas e saidas)",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "express": "^4.19.2",
+    "mongoose": "^8.6.3",
+    "prom-client": "^15.1.3"
+  }
+}
