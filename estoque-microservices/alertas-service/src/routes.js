@@ -13,15 +13,16 @@ router.get("/alertas/health", (req, res) => {
 // Fluxo em tempo real (Server-Sent Events). Deve vir antes de /alertas/:id.
 router.get("/alertas/stream", (req, res) => registrarCliente(req, res));
 
-// Lista alertas. Filtros: ?status=ATIVO|RESOLVIDO&produto_id=...&limite=100
+// Lista alertas. Filtros: ?status=ATIVO|RESOLVIDO|ENCERRADO (aceita lista
+// separada por virgula, ex.: RESOLVIDO,ENCERRADO)&produto_id=...&limite=100
 router.get("/alertas", async (req, res) => {
   const filtro = {};
   if (req.query.status) {
-    const status = String(req.query.status).toUpperCase();
-    if (!["ATIVO", "RESOLVIDO"].includes(status)) {
-      return res.status(400).json({ erro: "status deve ser ATIVO ou RESOLVIDO" });
+    const status = String(req.query.status).toUpperCase().split(",").map((s) => s.trim());
+    if (!status.every((s) => ["ATIVO", "RESOLVIDO", "ENCERRADO"].includes(s))) {
+      return res.status(400).json({ erro: "status deve ser ATIVO, RESOLVIDO ou ENCERRADO" });
     }
-    filtro.status = status;
+    filtro.status = { $in: status };
   }
   if (req.query.produto_id) filtro.produto_id = String(req.query.produto_id);
   const limite = Math.min(Math.max(parseInt(req.query.limite, 10) || 100, 1), 500);

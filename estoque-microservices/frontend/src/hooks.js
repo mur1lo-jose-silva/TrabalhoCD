@@ -61,7 +61,8 @@ export function useAlertasAoVivo(aoReceber) {
       const { acao, alerta } = JSON.parse(e.data);
       setAtivos((lista) => {
         const outros = lista.filter((a) => a.id !== alerta.id);
-        return acao === "RESOLVIDO" ? outros : [alerta, ...outros];
+        // RESOLVIDO (estoque reposto) e ENCERRADO (produto removido) saem dos ativos.
+        return acao === "RESOLVIDO" || acao === "ENCERRADO" ? outros : [alerta, ...outros];
       });
       setVersao((v) => v + 1);
       callback.current?.(acao, alerta);

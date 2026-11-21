@@ -21,6 +21,8 @@ export default function App() {
       mostrar("alerta", "Estoque baixo", `${alerta.nome}: ${alerta.saldo} un. (minimo ${alerta.estoque_minimo})`);
     } else if (acao === "RESOLVIDO") {
       mostrar("sucesso", "Alerta resolvido", `${alerta.nome} voltou a ${alerta.saldo} un.`);
+    } else if (acao === "ENCERRADO") {
+      mostrar("info", "Alerta encerrado", `${alerta.nome} foi removido do catálogo.`);
     }
   });
 

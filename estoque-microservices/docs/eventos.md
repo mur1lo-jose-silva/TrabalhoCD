@@ -94,18 +94,21 @@ consumidor possa simplesmente substituir a sua cópia se a `versao` for mais nov
 
 ### 3.3 `produto.removido`
 - **Publicado por:** Catálogo, quando um produto é removido (remoção lógica).
-- **Consumido por:** Estoque (marca o item como inativo: o histórico é mantido e
-  novas movimentações são bloqueadas).
+- **Consumido por:** Estoque (marca o item como inativo: o histórico e o saldo
+  são mantidos e novas movimentações são bloqueadas). Remover do catálogo **não**
+  é uma baixa física: nenhuma movimentação é criada. O Estoque então publica
+  `estoque.atualizado` com `motivo: PRODUTO_REMOVIDO`.
 
 ```json
 { "produto_id": "6740a1b2c3d4e5f601234567" }
 ```
 
 ### 3.4 `estoque.atualizado`
-- **Publicado por:** Estoque, a cada movimentação confirmada e quando o estoque
-  mínimo de um produto muda.
-- **Consumido por:** Alertas (abre um alerta quando o saldo cai abaixo do mínimo
-  e o resolve quando volta ao mínimo ou acima).
+- **Publicado por:** Estoque, a cada movimentação confirmada, quando o estoque
+  mínimo de um produto muda e quando o produto é removido do catálogo.
+- **Consumido por:** Alertas (abre um alerta quando o saldo cai abaixo do mínimo,
+  o **resolve** quando volta ao mínimo ou acima e o **encerra** quando o produto é
+  removido).
 
 ```json
 {
@@ -116,12 +119,20 @@ consumidor possa simplesmente substituir a sua cópia se a `versao` for mais nov
   "saldo_atual": 8,
   "estoque_minimo": 10,
   "movimentacao_id": 42,
-  "motivo": "MOVIMENTACAO"
+  "motivo": "MOVIMENTACAO",
+  "ativo": true
 }
 ```
 
-`motivo` é `MOVIMENTACAO` ou `MINIMO_ALTERADO`. No segundo caso,
-`movimentacao_id` é `null` e `saldo_anterior` é igual a `saldo_atual`.
+| `motivo` | Quando | Observação |
+|---|---|---|
+| `MOVIMENTACAO` | ENTRADA, SAÍDA ou estorno confirmado | `movimentacao_id` preenchido |
+| `MINIMO_ALTERADO` | O Catálogo mudou o estoque mínimo | `movimentacao_id` nulo, saldo inalterado |
+| `PRODUTO_REMOVIDO` | O produto foi removido do catálogo | `ativo: false`, `movimentacao_id` nulo, saldo inalterado |
+
+`ativo` indica se o produto ainda está no catálogo. Consumidores devem tratar
+`ativo: false` como "não há mais o que acompanhar" (o Alertas encerra o alerta
+com status `ENCERRADO`, diferente de `RESOLVIDO`, pois o estoque não foi reposto).
 
 ---
 

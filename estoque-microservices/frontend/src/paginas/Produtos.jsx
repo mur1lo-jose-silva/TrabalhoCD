@@ -67,7 +67,17 @@ export default function Produtos({ mostrar, versaoAlertas }) {
   );
 
   async function remover(p) {
-    if (!window.confirm(`Remover "${p.nome}" do catálogo? O histórico de movimentações é mantido.`)) return;
+    // Remover do catalogo NAO da baixa no estoque: se ainda ha unidades, avisa
+    // para registrar a saida (descarte, devolucao...) antes, se for o caso.
+    const saldo = p.estoque?.saldo ?? 0;
+    const aviso =
+      saldo > 0
+        ? `
+
+Atenção: ainda há ${saldo} un. em estoque. A remoção NÃO registra saída. ` +
+          "Se as unidades saíram (descarte, devolução ao fornecedor), registre a SAÍDA em Movimentações antes."
+        : "";
+    if (!window.confirm(`Remover "${p.nome}" do catálogo? O histórico de movimentações é mantido.${aviso}`)) return;
     try {
       await api.removerProduto(p.id);
       mostrar("sucesso", "Produto removido", `${p.nome} foi removido do catálogo.`);

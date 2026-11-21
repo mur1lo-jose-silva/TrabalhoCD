@@ -17,6 +17,7 @@ const NOME_ACAO = {
   [ACOES.ABRIR]: "ABERTO",
   [ACOES.ATUALIZAR]: "ATUALIZADO",
   [ACOES.RESOLVER]: "RESOLVIDO",
+  [ACOES.ENCERRAR]: "ENCERRADO",
 };
 
 export async function atualizarGaugeAtivos() {
@@ -65,10 +66,10 @@ export async function aplicarEvento(evento) {
       { $set: snapshot },
       { new: true }
     );
-  } else if (acao === ACOES.RESOLVER) {
+  } else if (acao === ACOES.RESOLVER || acao === ACOES.ENCERRAR) {
     alerta = await Alerta.findOneAndUpdate(
       { _id: ativo._id, status: "ATIVO" },
-      { $set: { ...snapshot, status: "RESOLVIDO", resolvido_em: new Date() } },
+      { $set: { ...snapshot, status: NOME_ACAO[acao], resolvido_em: new Date() } },
       { new: true }
     );
   }

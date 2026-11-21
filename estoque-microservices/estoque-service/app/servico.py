@@ -63,6 +63,7 @@ def _evento_estoque_atualizado(
     versao_estoque: int,
     movimentacao_id: int | None,
     motivo: str,
+    ativo: bool = True,
 ) -> None:
     _gravar_outbox(
         db,
@@ -78,6 +79,7 @@ def _evento_estoque_atualizado(
                 "estoque_minimo": estoque_minimo,
                 "movimentacao_id": movimentacao_id,
                 "motivo": motivo,
+                "ativo": ativo,
             },
         ),
     )
@@ -297,6 +299,7 @@ def processar_evento_produto(db: Session, evento: dict) -> str:
                 versao_estoque=item.versao_estoque,
                 movimentacao_id=None,
                 motivo="MINIMO_ALTERADO",
+                ativo=item.ativo,
             )
         return "aplicado"
 
@@ -305,6 +308,22 @@ def processar_evento_produto(db: Session, evento: dict) -> str:
             return "ignorado"
         item.ativo = False
         item.versao = versao
+        # Avisa quem depende do estoque (ex.: Alertas) que o produto saiu do
+        # catalogo. O saldo NAO muda: remover do catalogo nao e uma baixa fisica.
+        item.versao_estoque += 1
+        _evento_estoque_atualizado(
+            db,
+            produto_id=produto_id,
+            nome=item.nome,
+            sku=item.sku,
+            saldo_anterior=item.saldo,
+            saldo_atual=item.saldo,
+            estoque_minimo=item.estoque_minimo,
+            versao_estoque=item.versao_estoque,
+            movimentacao_id=None,
+            motivo="PRODUTO_REMOVIDO",
+            ativo=False,
+        )
         return "aplicado"
 
     return "ignorado"  # tipo desconhecido: nao interessa a este servico
