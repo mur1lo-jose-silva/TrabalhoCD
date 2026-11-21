@@ -144,7 +144,7 @@ docker compose down -v     # para e apaga os bancos e filas
 | **Produtos** | Catálogo com o saldo vindo do Estoque. Mostra "sincronizando…" enquanto o Estoque ainda não recebeu o evento. Se o Catálogo cair, a lista passa a vir da cópia local do Estoque. |
 | **Novo / editar produto** | Campos fixos, **atributos dinâmicos** e estoque inicial (só na criação). O saldo não é editável. |
 | **Movimentações** | Registra ENTRADA/SAÍDA com resposta imediata ("saldo insuficiente"), histórico filtrável e **estorno**. |
-| **Alertas** | Alertas ativos e resolvidos, **ao vivo** via SSE. Contador no menu e aviso na tela quando um alerta abre ou fecha. |
+| **Alertas** | Alertas ativos e fechados, **ao vivo** via SSE. Um alerta é **resolvido** quando o estoque é reposto e **encerrado** quando o produto é removido do catálogo. |
 
 ---
 
@@ -159,7 +159,7 @@ Erros sempre no formato `{"erro": "mensagem"}`.
 | POST | `/produtos` | Cadastra. Aceita `estoque_inicial` (vai no evento, não é guardado aqui) |
 | GET | `/produtos/{id}` | Detalhe |
 | PUT | `/produtos/{id}` | Edição parcial (nome, sku, categoria, preco, estoque_minimo, atributos) |
-| DELETE | `/produtos/{id}` | Remoção lógica (o histórico no Estoque é mantido) |
+| DELETE | `/produtos/{id}` | Remoção lógica. Não é baixa de estoque: saldo e histórico ficam no Estoque, e um alerta ativo do produto é encerrado |
 
 ### Estoque — `/estoque`
 | Método | Rota | Descrição |
@@ -176,7 +176,7 @@ Não existe `PUT` nem `DELETE` de movimentação: o histórico é imutável.
 ### Alertas — `/alertas`
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/alertas` | Lista (filtros `status=ATIVO\|RESOLVIDO`, `produto_id`, `limite`) |
+| GET | `/alertas` | Lista (filtros `status=ATIVO\|RESOLVIDO\|ENCERRADO`, aceita lista separada por vírgula; `produto_id`; `limite`) |
 | GET | `/alertas/{id}` | Detalhe |
 | GET | `/alertas/stream` | Fluxo em tempo real (Server-Sent Events) |
 

@@ -282,6 +282,19 @@ def cenario_alertas():
           acoes == ["ABERTO", "ATUALIZADO", "RESOLVIDO", "ABERTO"], acoes)
     check("status invalido -> 400", req("GET", f"{B}/alertas?status=X")[0] == 400)
 
+    secao("Alertas: remover produto com alerta ativo encerra o alerta")
+    movs_antes = len(req("GET", f"{B}/estoque/movimentacoes?produto_id={pid}")[1])
+    check("DELETE no Catalogo -> 204", req("DELETE", f"{B}/produtos/{pid}")[0] == 204)
+    esperar("alerta sai dos ativos", lambda: ativos(pid) == [])
+    fechados = req("GET", f"{B}/alertas?status=ENCERRADO&produto_id={pid}")[1]
+    check("alerta fechado como ENCERRADO (nao RESOLVIDO)", len(fechados) == 1, fechados)
+    check("remocao nao criou movimentacao nem mudou o saldo",
+          len(req("GET", f"{B}/estoque/movimentacoes?produto_id={pid}")[1]) == movs_antes
+          and saldo(pid)[1]["saldo"] == 11)
+    time.sleep(1)
+    acoes = [e["acao"] for e in EVENTOS_SSE if e["alerta"]["produto_id"] == pid]
+    check("tela (SSE) recebeu ENCERRADO", acoes[-1:] == ["ENCERRADO"], acoes)
+
 
 def cenario_falhas():
     secao("Falha 1: Catalogo fora do ar -> vendas continuam")

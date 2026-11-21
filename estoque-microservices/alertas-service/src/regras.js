@@ -3,11 +3,14 @@
 // Um alerta e aberto quando o saldo CRUZA para baixo do minimo e resolvido
 // quando volta ao minimo ou acima. Enquanto continua abaixo, o mesmo alerta
 // e apenas atualizado: dez vendas seguidas nao geram dez alertas.
+// Se o produto foi removido do catalogo, o alerta ativo e ENCERRADO (o estoque
+// nao foi reposto; o produto simplesmente deixou de existir).
 
 export const ACOES = Object.freeze({
   ABRIR: "ABRIR",
   ATUALIZAR: "ATUALIZAR",
   RESOLVER: "RESOLVER",
+  ENCERRAR: "ENCERRAR",
   NADA: "NADA",
 });
 
@@ -15,7 +18,8 @@ export function estaAbaixoDoMinimo(saldo, minimo) {
   return saldo < minimo;
 }
 
-export function avaliar({ saldo_atual, estoque_minimo }, existeAlertaAtivo) {
+export function avaliar({ saldo_atual, estoque_minimo, ativo = true }, existeAlertaAtivo) {
+  if (ativo === false) return existeAlertaAtivo ? ACOES.ENCERRAR : ACOES.NADA;
   const abaixo = estaAbaixoDoMinimo(saldo_atual, estoque_minimo);
   if (abaixo && !existeAlertaAtivo) return ACOES.ABRIR;
   if (abaixo && existeAlertaAtivo) return ACOES.ATUALIZAR;
@@ -34,6 +38,9 @@ export function validarEvento(evento) {
   if (!dados.produto_id) throw new Error("dados.produto_id ausente");
   for (const campo of ["saldo_atual", "estoque_minimo"]) {
     if (!Number.isInteger(dados[campo])) throw new Error(`dados.${campo} invalido`);
+  }
+  if (dados.ativo !== undefined && typeof dados.ativo !== "boolean") {
+    throw new Error("dados.ativo invalido");
   }
   return evento;
 }

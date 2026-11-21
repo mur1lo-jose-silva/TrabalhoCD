@@ -10,7 +10,7 @@ export default function Alertas({ ativos, conectado, versao }) {
 
   useEffect(() => {
     api
-      .listarAlertas("RESOLVIDO", 50)
+      .listarAlertas("RESOLVIDO,ENCERRADO", 50)
       .then((r) => {
         setResolvidos(r);
         setErro("");
@@ -73,12 +73,12 @@ export default function Alertas({ ativos, conectado, versao }) {
         </div>
       )}
 
-      <h2>Resolvidos recentemente</h2>
+      <h2>Fechados recentemente</h2>
       {erro && <Aviso>Não foi possível carregar o histórico: {erro}</Aviso>}
       {resolvidos === null ? (
         !erro && <Vazio>Carregando…</Vazio>
       ) : resolvidos.length === 0 ? (
-        <Vazio>Nenhum alerta resolvido ainda.</Vazio>
+        <Vazio>Nenhum alerta fechado ainda.</Vazio>
       ) : (
         <div className="tabela-wrap">
           <table>
@@ -87,8 +87,9 @@ export default function Alertas({ ativos, conectado, versao }) {
                 <th>Produto</th>
                 <th className="num">Saldo final</th>
                 <th className="num">Mínimo</th>
+                <th>Motivo</th>
                 <th>Aberto em</th>
-                <th>Resolvido em</th>
+                <th>Fechado em</th>
               </tr>
             </thead>
             <tbody>
@@ -100,6 +101,13 @@ export default function Alertas({ ativos, conectado, versao }) {
                   </td>
                   <td className="num">{a.saldo}</td>
                   <td className="num">{a.estoque_minimo}</td>
+                  <td>
+                    {a.status === "ENCERRADO" ? (
+                      <Badge titulo="O produto foi removido do catálogo">produto removido</Badge>
+                    ) : (
+                      <Badge tom="ok">estoque reposto</Badge>
+                    )}
+                  </td>
                   <td className="sub">{formatar.dataHora(a.aberto_em)}</td>
                   <td className="sub">{formatar.dataHora(a.resolvido_em)}</td>
                 </tr>

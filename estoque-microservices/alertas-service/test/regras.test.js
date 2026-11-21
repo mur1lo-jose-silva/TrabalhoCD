@@ -31,6 +31,14 @@ test("aumento do minimo pode abrir alerta sem movimentacao", () => {
   assert.equal(avaliar({ saldo_atual: 15, estoque_minimo: 20 }, false), ACOES.ABRIR);
 });
 
+test("produto removido encerra o alerta ativo", () => {
+  assert.equal(avaliar({ saldo_atual: 3, estoque_minimo: 10, ativo: false }, true), ACOES.ENCERRAR);
+});
+
+test("produto removido sem alerta ativo nao abre alerta", () => {
+  assert.equal(avaliar({ saldo_atual: 3, estoque_minimo: 10, ativo: false }, false), ACOES.NADA);
+});
+
 const valido = {
   event_id: "e1",
   tipo: "estoque.atualizado",
@@ -48,4 +56,5 @@ test("recusa eventos mal formados", () => {
   assert.throws(() => validarEvento({ ...valido, tipo: "produto.criado" }));
   assert.throws(() => validarEvento({ ...valido, versao: "3" }));
   assert.throws(() => validarEvento({ ...valido, dados: { produto_id: "p1", saldo_atual: 1.5, estoque_minimo: 1 } }));
+  assert.throws(() => validarEvento({ ...valido, dados: { ...valido.dados, ativo: "nao" } }));
 });
