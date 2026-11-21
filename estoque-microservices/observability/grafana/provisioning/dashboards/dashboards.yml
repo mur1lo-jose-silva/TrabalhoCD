@@ -1,0 +1,11 @@
+apiVersion: 1
+
+# Carrega os dashboards versionados no repositorio (pasta json/).
+providers:
+  - name: estoque
+    folder: Estoque
+    type: file
+    disableDeletion: true
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

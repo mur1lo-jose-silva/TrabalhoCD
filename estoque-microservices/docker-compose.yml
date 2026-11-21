@@ -1,3 +1,23 @@
+# Ambiente completo do sistema de estoque.
+# Subir:   docker compose up --build
+# Derrubar: docker compose down     (com -v apaga tambem os bancos)
+#
+# Cada servico tem um healthcheck. Os servicos de aplicacao so iniciam depois
+# que o PROPRIO banco e o RabbitMQ estao saudaveis (depends_on + condition).
+# Mesmo assim, todos reconectam sozinhos se o broker cair depois.
+
+x-servico-app: &servico-app
+  restart: unless-stopped # volta sozinho se cair, mas respeita "docker compose stop"
+  networks:
+    - estoque-net
+
+x-mongo-healthcheck: &mongo-healthcheck
+  test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+  interval: 5s
+  timeout: 5s
+  retries: 20
+  start_period: 10s
+
 services:
   # ---------- API GATEWAY / ROTEAMENTO ----------
   traefik:
@@ -8,89 +28,162 @@ services:
     ports:
       - "80:80"      # porta unica de entrada da aplicacao
       - "8080:8080"  # dashboard do Traefik
-    networks:
-      - estoque-net
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    <<: *servico-app
 
-  # ---------- SERVICO PRODUTOS (Python + Postgres) ----------
-  produtos-service:
-    build: ./produtos-service
+  # ---------- INTERFACE WEB (React compilado + nginx) ----------
+  frontend:
+    build: ./frontend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    <<: *servico-app
+
+  # ---------- SERVICO CATALOGO (Node + MongoDB) ----------
+  catalogo-service:
+    build: ./catalogo-service
     environment:
-      DATABASE_URL: postgresql://estoque:estoque@postgres:5432/produtos
+      MONGO_URL: mongodb://mongo-catalogo:27017/catalogo
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      MOVIMENTACOES_QUEUE: movimentacoes.estoque
+      EVENTS_EXCHANGE: estoque.eventos
+      PORT: 3000
     depends_on:
-      - postgres
-      - rabbitmq
-    networks:
-      - estoque-net
+      mongo-catalogo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/produtos/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    <<: *servico-app
 
-  postgres:
+  mongo-catalogo:
+    image: mongo:7.0
+    volumes:
+      - mongo-catalogo-data:/data/db
+    healthcheck: *mongo-healthcheck
+    <<: *servico-app
+
+  # ---------- SERVICO ESTOQUE (Python + Postgres) ----------
+  estoque-service:
+    build: ./estoque-service
+    environment:
+      DATABASE_URL: postgresql://estoque:estoque@postgres-estoque:5432/estoque
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      EVENTS_EXCHANGE: estoque.eventos
+    depends_on:
+      postgres-estoque:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/estoque/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    <<: *servico-app
+
+  postgres-estoque:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: estoque
       POSTGRES_PASSWORD: estoque
-      POSTGRES_DB: produtos
+      POSTGRES_DB: estoque
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - estoque-net
+      - postgres-estoque-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U estoque -d estoque"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    <<: *servico-app
 
-  # ---------- SERVICO MOVIMENTACOES (Node + MongoDB) ----------
-  movimentacoes-service:
-    build: ./movimentacoes-service
+  # ---------- SERVICO ALERTAS (Node + MongoDB) ----------
+  alertas-service:
+    build: ./alertas-service
     environment:
-      MONGO_URL: mongodb://mongo:27017/movimentacoes
+      MONGO_URL: mongodb://mongo-alertas:27017/alertas
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      MOVIMENTACOES_QUEUE: movimentacoes.estoque
+      EVENTS_EXCHANGE: estoque.eventos
       PORT: 3000
     depends_on:
-      - mongo
-      - rabbitmq
-    networks:
-      - estoque-net
+      mongo-alertas:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/alertas/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    <<: *servico-app
 
-  mongo:
-    image: mongo:7
+  mongo-alertas:
+    image: mongo:7.0
     volumes:
-      - mongo-data:/data/db
-    networks:
-      - estoque-net
+      - mongo-alertas-data:/data/db
+    healthcheck: *mongo-healthcheck
+    <<: *servico-app
 
   # ---------- MENSAGERIA ASSINCRONA ----------
   rabbitmq:
     image: rabbitmq:3.13-management
+    hostname: rabbitmq # nome fixo: o RabbitMQ guarda os dados por nome de no
     ports:
       - "15672:15672"  # painel de administracao (usuario/senha: guest/guest)
-    networks:
-      - estoque-net
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+    <<: *servico-app
 
   # ---------- OBSERVABILIDADE ----------
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.54.1
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
-    networks:
-      - estoque-net
+    <<: *servico-app
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.2.0
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
+      # Acesso anonimo SOMENTE LEITURA: abre o dashboard sem login na demonstracao
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Dashboard do projeto como pagina inicial
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/json/estoque.json
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
     ports:
       - "3001:3000"  # Grafana em http://localhost:3001 (admin/admin)
     depends_on:
       - prometheus
-    networks:
-      - estoque-net
+    <<: *servico-app
 
 volumes:
-  postgres-data:
-  mongo-data:
+  postgres-estoque-data:
+  mongo-catalogo-data:
+  mongo-alertas-data:
+  rabbitmq-data:
 
 networks:
   estoque-net:

@@ -6,6 +6,15 @@ entryPoints:
   web:
     address: ":80"
 
+# Usado pelo healthcheck do container (traefik healthcheck --ping).
+ping: {}
+
+# Metricas para o Prometheus (em :8080/metrics), por servico de destino.
+metrics:
+  prometheus:
+    addServicesLabels: true
+    addRoutersLabels: true
+
 api:
   dashboard: true
   insecure: true
